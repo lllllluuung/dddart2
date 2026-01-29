@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>iOS 飛鏢計分 (修正版)</title>
+    <style>
+        /* --- 關鍵修正區 Start --- */
+        
+        /* 1. 針對所有元素：允許操作，但禁止雙擊縮放 (解決按鈕沒反應與延遲問題) */
+        html, body {
+            touch-action: manipulation; 
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            user-select: none;
+            overscroll-behavior: none; /* 防止拉動重整 */
+        }
+
+        /* 2. 只針對飛鏢盤區域：完全禁止瀏覽器手勢 (防止丟飛鏢時畫面亂跑) */
+        #board-wrapper, #touch-layer {
+            touch-action: none;
+        }
+
+        /* --- 關鍵修正區 End --- */
+
+        body {
+            font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #fff;
+            margin: 0;
+            height: 100vh;
+            /* 支援瀏海屏 */
+            padding-bottom: env(safe-area-inset-bottom);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* UI 元件樣式 */
+        button {
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .screen {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            background: #1a1a1a;
+            z-index: 10;
+            transition: opacity 0.3s;
+        }
+        .hidden { 
+            visibility: hidden; 
+            opacity: 0; 
+            pointer-events: none; 
+            z-index: -1; 
+        }
+
+        /* Setup Screen */
+        .setup-container {
+            align-items: center;
+            justify-content: center;
+            z-index: 100; /* 最高層級 */
+        }
+        .opt-group { margin-bottom: 25px; text-align: center; }
+        .opt-label { color: #888; margin-bottom: 10px; font-size: 0.9rem; }
+        .opt-btn {
+            background: #333; color: #fff; border: 1px solid #444;
+            padding: 12px 24px; margin: 0 4px;
+            border-radius: 8px; font-size: 1.1rem;
+        }
+        .opt-btn.selected {
+            background: #27ae60; border-color: #27ae60;
+            font-weight: bold; box-shadow: 0 0 15px rgba(39, 174, 96, 0.4);
+        }
+        .start-btn {
+            background: #c0392b; color: #fff; border: none;
+            padding: 16px 60px; border-radius: 50px;
+            font-size: 1.5rem; font-weight: bold; margin-top: 20px;
+            box-shadow: 0 4px 15px rgba(192, 57, 43, 0.4);
+        }
+
+        /* Game Screen */
+        .header {
+            flex: 0 0 50px;
+            background: #252525;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 15px; border-bottom: 1px solid #333;
+        }
+        .btn-sm {
+            background: #444; border: none; color: #ccc;
+            padding: 6px 12px; border-radius: 4px; font-size: 0.9rem;
+        }
+
+        .scoreboard {
+            flex: 0 0 auto;
+            display: flex; gap: 8px; padding: 10px;
+            background: #1a1a1a; overflow-x: auto;
+        }
+        .p-card {
+            flex: 1; background: #2a2a2a; border: 1px solid #333;
+            border-radius: 8px; text-align: center; padding: 8px 4px;
+            opacity: 0.4; transition: 0.2s; min-width: 60px;
+        }
+        .p-card.active {
+            opacity: 1; background: #353535; border-color: #f1c40f;
+            transform: scale(1.05);
+        }
+        .p-score { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+        .p-darts { color: #f1c40f; font-size: 0.8rem; height: 1.2em; }
+
+        /* Board Area */
+        #board-wrapper {
+            flex: 1;
+            position: relative;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: radial-gradient(circle, #222, #000);
+            overflow: hidden;
+        }
+        #board-container {
+            position: relative;
+            width: 340px; height: 340px;
+            max-width: 85vmin; max-height: 85vmin;
+        }
+        svg {
+            width: 100%; height: 100%;
+            pointer-events: none; /* SVG 純展示 */
+            filter: drop-shadow(0 8px 20px rgba(0,0,0,0.5));
+        }
+        /* 隱形觸控層 */
+        #touch-layer {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 50;
+            /* 開發用: background: rgba(255,0,0,0.1); */ 
+        }
+
+        .btn-out {
+            margin-top: 15px;
+            background: #34495e; color: #ccc; border: 2px solid #444;
+            padding: 12px 50px; border-radius: 30px;
+            font-size: 1.2rem; font-weight: bold;
+            z-index: 60;
+        }
+        .btn-out:active { background: #c0392b; color: white; border-color: #e74c3c; }
+
+        /* Log */
+        .log-area {
+            flex: 0 0 20vh;
+            background: #1e1e1e; border-top: 2px solid #f1c40f;
+            display: flex; flex-direction: column;
+        }
+        .log-list {
+            flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+            padding: 0; margin: 0; list-style: none;
+        }
+        .log-item {
+            display: flex; justify-content: space-between;
+            padding: 8px 15px; border-bottom: 1px solid #333;
+            color: #ccc; font-size: 0.9rem;
+        }
+
+        /* Feedback */
+        .fx {
+            position: fixed; pointer-events: none; z-index: 200;
+            font-size: 3rem; font-weight: 900;
+            text-shadow: 0 2px 8px #000;
+            animation: pop 0.4s ease-out forwards;
+        }
+        @keyframes pop {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -120%) scale(1.2); opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        /* Winner Overlay */
+        #win-overlay {
+            background: rgba(0,0,0,0.92); z-index: 200;
+            align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="setup-screen" class="screen setup-container">
+        <h1 style="font-size: 3rem; margin-bottom: 10px;">🎯</h1>
+        <h2 style="margin-bottom: 30px;">飛鏢計分</h2>
+        
+        <div class="opt-group">
+            <div class="opt-label">目標分數</div>
+            <button onclick="selectOpt('target', 301, this)" class="opt-btn selected">301</button>
+            <button onclick="selectOpt('target', 501, this)" class="opt-btn">501</button>
+            <button onclick="selectOpt('target', 701, this)" class="opt-btn">701</button>
+        </div>
+
+        <div class="opt-group">
+            <div class="opt-label">玩家人數</div>
+            <button onclick="selectOpt('players', 2, this)" class="opt-btn selected">2P</button>
+            <button onclick="selectOpt('players', 3, this)" class="opt-btn">3P</button>
+            <button onclick="selectOpt('players', 4, this)" class="opt-btn">4P</button>
+        </div>
+
+        <button class="start-btn" onclick="startGame()">開始遊戲</button>
+    </div>
+
+    <div id="game-screen" class="screen hidden">
+        <div class="header">
+            <span style="color:#f1c40f; font-weight:bold;">Round <span id="lbl-round">1</span></span>
+            <div>
+                <button class="btn-sm" onclick="undo()">悔棋</button>
+                <button class="btn-sm" style="background:#c0392b; color:#fff;" onclick="resetGame()">重置</button>
+            </div>
+        </div>
+
+        <div class="scoreboard" id="score-box"></div>
+
+        <div id="board-wrapper">
+            <div id="board-container">
+                <svg id="svg-board" viewBox="-205 -205 410 410"></svg>
+                <div id="touch-layer"></div>
+            </div>
+            <button class="btn-out" id="btn-out">MISS / OUT</button>
+        </div>
+
+        <div class="log-area">
+            <div style="background:#333; color:#aaa; font-size:0.8rem; padding:4px 10px;">紀錄</div>
+            <ul class="log-list" id="log-list"></ul>
+        </div>
+    </div>
+
+    <div id="win-overlay" class="screen hidden">
+        <div style="font-size:5rem;">🏆</div>
+        <h1 style="color:gold; font-size:3rem; margin:10px 0;">WINNER!</h1>
+        <h2 id="lbl-winner" style="color:#fff; margin-bottom:30px;">Player 1</h2>
+        <button class="start-btn" onclick="location.reload()">再玩一局</button>
+    </div>
+
+    <script>
+        // --- 變數與設定 ---
+        let cfg = { target: 301, players: 2 };
+        let state = {
+            players: [], idx: 0, round: 1, darts: 0,
+            curScores: [], curVals: [], history: []
+        };
+        // 飛鏢盤數字順序 (20分在index 0)
+        const NUMS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+        let isLocked = false;
+
+        // --- 設定頁邏輯 ---
+        function selectOpt(key, val, el) {
+            cfg[key] = val;
+            let siblings = el.parentElement.querySelectorAll('button');
+            siblings.forEach(b => b.classList.remove('selected'));
+            el.classList.add('selected');
+        }
+
+        function startGame() {
+            // 建置玩家資料
+            state.players = [];
+            let html = '';
+            for(let i=0; i<cfg.players; i++) {
+                state.players.push({ id: i, score: cfg.target, temp: cfg.target });
+                html += `
+                <div class="p-card ${i===0?'active':''}" id="card-${i}">
+                    <div style="font-size:0.75rem;color:#888;">P${i+1}</div>
+                    <div class="p-score" id="score-${i}">${cfg.target}</div>
+                    <div class="p-darts" id="darts-${i}"></div>
+                </div>`;
+            }
+            document.getElementById('score-box').innerHTML = html;
+
+            // 切換畫面
+            document.getElementById('setup-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            
+            // 初始化狀態
+            state.idx = 0; state.round = 1; state.darts = 0;
+            state.curScores = []; state.curVals = []; state.history = [];
+            isLocked = false;
+            
+            drawSVG(); // 畫盤面
+            setupTouch(); // 綁定觸控
+        }
+
+        function resetGame() {
+            if(confirm("確定要重置嗎？")) location.reload();
+        }
+
+        // --- 繪製 SVG (純視覺) ---
+        function drawSVG() {
+            const svg = document.getElementById('svg-board');
+            let h = '';
+            // 扇形
+            for(let i=0; i<20; i++) {
+                let ang = -90 + (i*18);
+                let num = NUMS[i];
+                let c1 = i%2===0 ? '#111' : '#e0e0e0';
+                let c2 = i%2===0 ? '#c0392b' : '#27ae60';
+                
+                h += getPath(ang, 160, 170, c2); // Double
+                h += getPath(ang, 107, 160, c1); // Outer
+                h += getPath(ang, 97, 107, c2);  // Treble
+                h += getPath(ang, 32, 97, c1);   // Inner
+                
+                // 數字
+                let rad = ang * Math.PI / 180;
+                let tx = Math.cos(rad) * 190;
+                let ty = Math.sin(rad) * 190 + 6;
+                h += `<text x="${tx}" y="${ty}" fill="#fff" text-anchor="middle" font-weight="bold" font-size="24">${num}</text>`;
+            }
+            // 紅心
+            h += `<circle cx="0" cy="0" r="32" fill="#27ae60" stroke="#ccc" />`;
+            h += `<circle cx="0" cy="0" r="14" fill="#c0392b" stroke="none" />`;
+            svg.innerHTML = h;
+        }
+
+        function getPath(ang, rIn, rOut, col) {
+            let a1 = (ang-9)*Math.PI/180, a2 = (ang+9)*Math.PI/180;
+            let d = `M ${Math.cos(a1)*rOut} ${Math.sin(a1)*rOut} A ${rOut} ${rOut} 0 0 1 ${Math.cos(a2)*rOut} ${Math.sin(a2)*rOut} L ${Math.cos(a2)*rIn} ${Math.sin(a2)*rIn} A ${rIn} ${rIn} 0 0 0 ${Math.cos(a1)*rIn} ${Math.sin(a1)*rIn} Z`;
+            return `<path d="${d}" fill="${col}" stroke="#888" stroke-width="1" />`;
+        }
+
+        // --- 觸控邏輯 ---
+        function setupTouch() {
+            const layer = document.getElementById('touch-layer');
+            const btnOut = document.getElementById('btn-out');
+
+            // 飛鏢盤使用 pointerdown (對應 iOS 最佳)
+            layer.addEventListener('pointerdown', (e) => {
+                e.preventDefault(); // 阻止多餘事件
+                if(isLocked || state.darts >= 3) return;
+                
+                // 計算相對座標
+                const rect = layer.getBoundingClientRect();
+                const x = e.clientX - (rect.left + rect.width/2);
+                const y = e.clientY - (rect.top + rect.height/2);
+                
+                // 1. 距離 (半徑) - 需依照實際大小縮放
+                // SVG寬410 (半徑205)
+                const scale = 410 / rect.width;
+                const r = Math.sqrt(x*x + y*y) * scale;
+                
+                // 2. 角度
+                let deg = Math.atan2(y, x) * 180 / Math.PI;
+
+                calcScore(r, deg, e.clientX, e.clientY);
+            });
+
+            // OUT 按鈕使用 onclick (因 CSS manipulation 已經讓它夠快了)
+            btnOut.onclick = (e) => {
+                // 獲取按鈕中心點做特效
+                let rect = e.target.getBoundingClientRect();
+                let cx = rect.left + rect.width/2;
+                let cy = rect.top + rect.height/2;
+                commitHit(0, 0, "MISS", cx, cy);
+            };
+        }
+
+        function calcScore(r, deg, cx, cy) {
+            let val=0, mult=1;
+
+            if(r < 32) {
+                val = 50; 
+            } else if(r > 170) {
+                // 出界 MISS
+                commitHit(0, 0, "MISS", cx, cy);
+                return;
+            } else {
+                if(r >= 32 && r < 97) mult = 1;
+                else if(r >= 97 && r < 107) mult = 3;
+                else if(r >= 107 && r < 160) mult = 1;
+                else if(r >= 160 && r <= 170) mult = 2;
+
+                // 角度轉分數 (偏移 90度 + 9度邊界)
+                let d = deg + 90; 
+                if(d < 0) d += 360;
+                let idx = Math.floor((d + 9) / 18) % 20;
+                val = NUMS[idx];
+            }
+            commitHit(val, mult, null, cx, cy);
+        }
+
+        function commitHit(val, mult, txt, cx, cy) {
+            if(isLocked) return;
+            isLocked = true; 
+            setTimeout(() => isLocked = false, 200); // 200ms 後解鎖
+
+            let p = state.players[state.idx];
+            let points = val * mult;
+            let dText = txt ? txt : (val===50?"BULL":(mult===3?`T${val}`:(mult===2?`D${val}`:val)));
+
+            // 顯示特效
+            showFx(dText, cx, cy, val, mult);
+
+            // 紀錄
+            state.history.push({
+                idx: state.idx, prev: p.score, r: state.round, d: state.darts,
+                rs: [...state.curScores], rv: [...state.curVals]
+            });
+
+            let newScore = p.score - points;
+
+            if(newScore < 0) {
+                // 爆分
+                state.curScores.push("BUST");
+                showFx("BUST", window.innerWidth/2, window.innerHeight/3, 0, 0);
+                p.score = p.temp; // 還原
+                setTimeout(() => nextTurn(true), 1000);
+            } else if(newScore === 0) {
+                // WIN
+                p.score = 0;
+                updateUI();
+                document.getElementById('lbl-winner').innerText = `Player ${state.idx+1}`;
+                document.getElementById('win-overlay').classList.remove('hidden');
+            } else {
+                // 正常
+                p.score = newScore;
+                state.curScores.push(dText);
+                state.curVals.push(points);
+                state.darts++;
+                updateUI();
+                
+                if(state.darts >= 3) {
+                    setTimeout(() => nextTurn(false), 300);
+                }
+            }
+        }
+
+        function nextTurn(isBust) {
+            let p = state.players[state.idx];
+            let drop = isBust ? 0 : (p.temp - p.score);
+            addLog(`P${state.idx+1}: [${state.curScores.join(',')}] -${drop} → ${p.score}`);
+
+            p.temp = p.score;
+            state.darts = 0;
+            state.curScores = []; state.curVals = [];
+            
+            document.getElementById(`card-${state.idx}`).classList.remove('active');
+            state.idx++;
+            if(state.idx >= cfg.players) {
+                state.idx = 0; state.round++;
+                addLog(`--- Round ${state.round} ---`);
+            }
+            document.getElementById(`card-${state.idx}`).classList.add('active');
+            updateUI();
+            isLocked = false;
+        }
+
+        function undo() {
+            if(state.history.length === 0 || isLocked) return;
+            let h = state.history.pop();
+
+            if(h.idx !== state.idx) {
+                document.getElementById(`card-${state.idx}`).classList.remove('active');
+                state.idx = h.idx; state.round = h.r;
+                document.getElementById(`card-${state.idx}`).classList.add('active');
+                // 簡單移除 log
+                let ul = document.getElementById('log-list');
+                if(ul.lastChild) ul.removeChild(ul.lastChild);
+            }
+
+            let p = state.players[h.idx];
+            p.score = h.prev;
+            state.darts = h.d;
+            state.curScores = h.rs;
+            state.curVals = h.rv;
+            updateUI();
+        }
+
+        function updateUI() {
+            state.players.forEach(p => document.getElementById(`score-${p.id}`).innerText = p.score);
+            document.getElementById('lbl-round').innerText = state.round;
+            document.getElementById(`darts-${state.idx}`).innerText = state.curScores.join(' ');
+        }
+
+        function showFx(txt, x, y, val, mult) {
+            let d = document.createElement('div');
+            d.className = 'fx';
+            d.innerText = txt;
+            d.style.left = x + 'px';
+            d.style.top = y + 'px';
+            d.style.color = (val===50?"#2ecc71":(mult===3?"#c0392b":(mult===2?"#f1c40f":"#fff")));
+            if(txt==="BUST") d.style.color = "#c0392b";
+            document.body.appendChild(d);
+            setTimeout(()=>d.remove(), 500);
+        }
+
+        function addLog(msg) {
+            let li = document.createElement('li');
+            li.className = 'log-item';
+            li.innerText = msg;
+            let ul = document.getElementById('log-list');
+            ul.appendChild(li);
+            ul.parentElement.scrollTop = ul.parentElement.scrollHeight;
+        }
+
+    </script>
+</body>
+</html>
