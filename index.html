@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>飛鏢計分 (v5.0 Bug修正版)</title>
+    <title>飛鏢計分 (v18.0 TLC大帥哥)</title>
     <style>
         /* --- 全域設定 --- */
         * {
@@ -46,6 +46,20 @@
         }
         .round-txt { color: #f1c40f; font-weight: bold; font-size: 1.1rem; }
 
+        /* 音效按鈕 */
+        #btn-sound {
+            font-size: 1.2rem;
+            background: transparent;
+            border: 1px solid #555;
+            width: 42px; height: 34px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            margin-right: 8px;
+            color: #fff;
+            transition: all 0.2s;
+        }
+        #btn-sound.off { opacity: 0.5; color: #888; text-decoration: line-through; }
+
         /* --- 分數板 --- */
         .scoreboard {
             flex: 0 0 auto;
@@ -66,7 +80,6 @@
             min-width: 60px;
             transition: 0.2s;
         }
-        .p-card.single-mode { max-width: 200px; margin: 0 auto; }
         .p-card.active {
             opacity: 1;
             background: #3e3e3e;
@@ -75,7 +88,7 @@
             box-shadow: 0 2px 10px rgba(0,0,0,0.5);
         }
         .p-score { font-size: 1.8rem; font-weight: bold; margin: 2px 0; }
-        .p-darts { color: #f1c40f; font-size: 0.7rem; height: 1em; }
+        .p-darts { color: #f1c40f; font-size: 0.7rem; height: 1em; margin-top:2px; }
 
         /* --- 飛鏢盤區域 --- */
         #board-area {
@@ -96,7 +109,7 @@
             max-width: 90vmin; max-height: 90vmin;
         }
 
-        /* 視野範圍維持 450 (MISS區加大) */
+        /* 視野範圍維持 450 (Miss好按) */
         svg {
             width: 100%; height: 100%;
             pointer-events: none;
@@ -121,7 +134,7 @@
         }
         #btn-out:active { background: #c0392b; color: #fff; border-color: #e74c3c; }
 
-        /* --- 歷史紀錄 --- */
+        /* --- 紀錄 --- */
         .log-panel {
             flex: none;
             height: 25vh;
@@ -136,7 +149,7 @@
             -webkit-overflow-scrolling: touch;
         }
         .log-item {
-            padding: 10px 15px; border-bottom: 1px solid #333;
+            padding: 8px 15px; border-bottom: 1px solid #333;
             display: flex; justify-content: space-between; color: #ccc; font-size: 0.9rem;
         }
         .log-head { background: #333; color: #aaa; padding: 5px 10px; font-size: 0.8rem; }
@@ -180,7 +193,6 @@
 
     <div id="setup-screen">
         <h1 style="color:#fff; font-size: 3rem; margin-bottom: 20px;">🎯 飛鏢計分</h1>
-        
         <div style="text-align:center; margin-bottom:30px;">
             <p style="color:#888; margin-bottom: 10px;">目標分數</p>
             <div id="opt-target">
@@ -189,7 +201,6 @@
                 <button class="setup-btn" data-val="701">701</button>
             </div>
         </div>
-        
         <div style="text-align:center; margin-bottom:30px;">
             <p style="color:#888; margin-bottom: 10px;">玩家人數</p>
             <div id="opt-players">
@@ -199,17 +210,17 @@
                 <button class="setup-btn" data-val="4">4人</button>
             </div>
         </div>
-
         <button class="start-btn" id="btn-start-game">開始遊戲</button>
-        <p style="color:#555; font-size: 0.8rem; margin-top: 10px;">(音效需在靜音模式關閉時播放)</p>
+        <p style="color:#555; font-size: 0.8rem; margin-top: 10px;">(音效可於遊戲中開關)</p>
     </div>
 
     <div id="game-screen" class="hidden">
         <div class="top-bar">
             <span class="round-txt">Round <span id="lbl-round">1</span></span>
-            <div>
-                <button class="btn-ctrl" onclick="undo()">悔棋</button>
-                <button class="btn-ctrl" onclick="location.reload()" style="background:#c0392b; margin-left:5px;">重置</button>
+            <div style="display:flex; align-items:center;">
+                <button id="btn-sound" onclick="toggleSound()">🔊</button>
+                <button class="btn-ctrl" onclick="undo()" style="margin-right:5px;">悔棋</button>
+                <button class="btn-ctrl" onclick="location.reload()" style="background:#c0392b;">重置</button>
             </div>
         </div>
 
@@ -220,7 +231,6 @@
                 <svg id="svg-board" viewBox="-225 -225 450 450"></svg>
                 <div id="touch-layer"></div>
             </div>
-            
             <div class="btn-out-wrap">
                 <button id="btn-out">MISS / OUT</button>
             </div>
@@ -235,128 +245,100 @@
     <div id="winner-screen" class="hidden">
         <h1 style="color:gold; font-size:3rem;">WINNER!</h1>
         <h2 id="lbl-winner" style="color:#fff;">Player 1</h2>
-        <button class="start-btn" onclick="location.reload()">再玩一局</button>
+        <button class="start-btn" onclick="location.reload()">再玩一局，蹦蹦去給狗幹</button>
     </div>
 
     <script>
-        // --- 設定與狀態 ---
+        // --- 核心變數 (使用最穩定的 dart10.html 架構) ---
         let cfg = { target: 301, players: 2 };
         let state = {
             players: [], idx: 0, round: 1, darts: 0,
             rScores: [], rValues: [], history: []
         };
-        let isLock = false;
+        let isLock = false; // 使用簡單鎖定，不搞複雜檢查
+        
         let audioCtx = null; 
+        let isSoundOn = true;
 
         const ORDER = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+        const R = { out: 220, dout: 170, din: 140, tout: 110, tin: 80, bull: 32 };
 
-        // --- 加大版幾何設定 (Fat Rings + Large Miss) ---
-        const R = { 
-            out: 220,   // MISS 邊界
-            dout: 170,  // 雙倍外
-            din: 140,   // 雙倍內
-            tout: 110,  // 三倍外
-            tin: 80,    // 三倍內
-            bull: 32    // 紅心
-        };
-
+        // --- 初始化 ---
         window.onload = function() {
-            const targetBtns = document.querySelectorAll('#opt-target button');
-            targetBtns.forEach(btn => {
-                btn.onclick = function() {
-                    targetBtns.forEach(b => b.classList.remove('sel'));
-                    this.classList.add('sel');
-                    cfg.target = parseInt(this.dataset.val);
-                };
-            });
-
-            const playerBtns = document.querySelectorAll('#opt-players button');
-            playerBtns.forEach(btn => {
-                btn.onclick = function() {
-                    playerBtns.forEach(b => b.classList.remove('sel'));
-                    this.classList.add('sel');
-                    cfg.players = parseInt(this.dataset.val);
-                };
-            });
-
+            const bindOpts = (id, key) => {
+                const btns = document.querySelectorAll(`#${id} button`);
+                btns.forEach(btn => {
+                    btn.onclick = function() {
+                        btns.forEach(b => b.classList.remove('sel'));
+                        this.classList.add('sel');
+                        cfg[key] = parseInt(this.dataset.val);
+                    };
+                });
+            };
+            bindOpts('opt-target', 'target');
+            bindOpts('opt-players', 'players');
             document.getElementById('btn-start-game').onclick = startGame;
         };
 
-        // --- 音效系統 (修正：自動喚醒機制) ---
+        // --- 音效系統 ---
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
 
-        // 關鍵修正：每次互動都檢查音效引擎是否掛了，掛了就叫醒
-        function checkAudio() {
-            if (audioCtx && (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
-                audioCtx.resume();
+        function toggleSound() {
+            isSoundOn = !isSoundOn;
+            const btn = document.getElementById('btn-sound');
+            if(isSoundOn) {
+                btn.innerText = "🔊";
+                btn.classList.remove('off');
+                if (!audioCtx) initAudio();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            } else {
+                btn.innerText = "🔇";
+                btn.classList.add('off');
             }
         }
 
         function playSound(type) {
-            checkAudio(); // 確保播放前引擎是活的
-            if (!audioCtx) return;
+            if (!isSoundOn) return;
+            if (!audioCtx) initAudio();
+            if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            const now = audioCtx.currentTime;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                const now = audioCtx.currentTime;
+                
+                let freq=600, endFreq=100, typeW='triangle';
+                if (type==='double'||type==='treble') { freq=1000; endFreq=600; typeW='sine'; }
+                else if (type==='bull') { freq=200; endFreq=600; typeW='square'; }
+                else if (type==='miss') { freq=100; endFreq=50; typeW='sawtooth'; }
 
-            if (type === 'single') {
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(600, now);
-                osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-                gainNode.gain.setValueAtTime(0.2, now);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-                osc.start(now); osc.stop(now + 0.1);
-            } else if (type === 'double' || type === 'treble') {
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(1000, now);
-                osc.frequency.exponentialRampToValueAtTime(600, now + 0.2);
-                gainNode.gain.setValueAtTime(0.2, now);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-                osc.start(now); osc.stop(now + 0.2);
-            } else if (type === 'bull') {
-                osc.type = 'square';
-                osc.frequency.setValueAtTime(200, now);
-                osc.frequency.linearRampToValueAtTime(600, now + 0.15);
-                gainNode.gain.setValueAtTime(0.2, now);
-                gainNode.gain.linearRampToValueAtTime(0.01, now + 0.15);
+                osc.type = typeW;
+                osc.frequency.setValueAtTime(freq, now);
+                osc.frequency.linearRampToValueAtTime(endFreq, now + 0.15);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.15);
                 osc.start(now); osc.stop(now + 0.15);
-            } else if (type === 'miss') {
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(100, now);
-                osc.frequency.linearRampToValueAtTime(50, now + 0.3);
-                gainNode.gain.setValueAtTime(0.2, now);
-                gainNode.gain.linearRampToValueAtTime(0.01, now + 0.3);
-                osc.start(now); osc.stop(now + 0.3);
-            }
+            } catch(e) { }
         }
 
+        // --- 遊戲邏輯 ---
         function startGame() {
-            initAudio();
-
+            initAudio(); 
             const sc = document.getElementById('score-container');
             sc.innerHTML = '';
             state.players = [];
             
-            const isSingle = cfg.players === 1;
-
-            // 修正：每個玩家物件都增加 startScore 屬性 (回合起始分數)
             for(let i=0; i<cfg.players; i++) {
-                state.players.push({ 
-                    id:i, 
-                    score:cfg.target, 
-                    startScore:cfg.target // 關鍵：這是該回合開始前的分數
-                });
+                // 初始化 temp = target，確保 Bust 還原有值
+                state.players.push({ id:i, score:cfg.target, temp:cfg.target });
                 
                 let d = document.createElement('div');
-                d.className = `p-card ${i===0?'active':''} ${isSingle?'single-mode':''}`;
-                d.id = `p-${i}`;
+                d.className = `p-card ${i===0?'active':''}`;
+                d.id = `p-${i}`; // 修正 ID
                 d.innerHTML = `<div style="font-size:0.8rem;color:#888;">P${i+1}</div><div class="p-score" id="s-${i}">${cfg.target}</div><div class="p-darts" id="d-${i}"></div>`;
                 sc.appendChild(d);
             }
@@ -375,18 +357,15 @@
         function drawVisualBoard() {
             const svg = document.getElementById('svg-board');
             let h = "";
-            
             for(let i=0; i<20; i++) {
                 let ang = -90 + i*18;
                 let num = ORDER[i];
                 let c1 = i%2===0 ? '#111' : '#e0e0e0';
                 let c2 = i%2===0 ? '#c0392b' : '#27ae60';
-                
                 h += createPath(ang, R.din, R.dout, c2); 
                 h += createPath(ang, R.tout, R.din, c1); 
                 h += createPath(ang, R.tin, R.tout, c2); 
                 h += createPath(ang, R.bull, R.tin, c1); 
-
                 let rad = ang * Math.PI/180;
                 let tx = Math.cos(rad)*190;
                 let ty = Math.sin(rad)*190 + 6;
@@ -394,13 +373,11 @@
             }
             h += `<circle cx="0" cy="0" r="${R.bull}" fill="#27ae60" stroke="#ddd" />`;
             h += `<circle cx="0" cy="0" r="14" fill="#c0392b" stroke="none" />`;
-            
             svg.innerHTML = h;
         }
 
         function createPath(ang, rIn, rOut, col) {
-            let a1 = (ang-9)*Math.PI/180;
-            let a2 = (ang+9)*Math.PI/180;
+            let a1 = (ang-9)*Math.PI/180, a2 = (ang+9)*Math.PI/180;
             let d = `M ${Math.cos(a1)*rOut} ${Math.sin(a1)*rOut} A ${rOut} ${rOut} 0 0 1 ${Math.cos(a2)*rOut} ${Math.sin(a2)*rOut} L ${Math.cos(a2)*rIn} ${Math.sin(a2)*rIn} A ${rIn} ${rIn} 0 0 0 ${Math.cos(a1)*rIn} ${Math.sin(a1)*rIn} Z`;
             return `<path d="${d}" fill="${col}" stroke="#888" stroke-width="1" />`;
         }
@@ -411,7 +388,7 @@
 
             const handleInput = (e) => {
                 if(e.type === 'touchstart') e.preventDefault();
-                checkAudio(); // 每次點擊都檢查音效
+                if(isSoundOn && audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
 
                 if(isLock || state.darts >= 3) return;
 
@@ -427,17 +404,16 @@
                 const rect = pad.getBoundingClientRect();
                 const x = clientX - rect.left - rect.width/2;
                 const y = clientY - rect.top - rect.height/2;
-
                 calculateScore(x, y, clientX, clientY);
             };
 
             pad.addEventListener('touchstart', handleInput, {passive:false});
             pad.addEventListener('mousedown', handleInput);
 
-            // OUT 按鈕
             const handleOut = (e) => {
                 if(e.type === 'touchstart') e.preventDefault();
-                checkAudio(); // 每次點擊都檢查音效
+                if(isSoundOn && audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                if(isLock || state.darts >= 3) return;
                 processHit(0, 0, "MISS", null);
             };
             btnOut.addEventListener('touchstart', handleOut, {passive:false});
@@ -448,32 +424,29 @@
         function calculateScore(x, y, absX, absY) {
             const container = document.getElementById('board-container');
             const scale = 450 / container.offsetWidth;
-            
             const r = Math.sqrt(x*x + y*y) * scale;
             const deg = Math.atan2(y, x) * 180 / Math.PI;
 
-            let val = 0, mult = 1;
-            let soundType = 'single';
+            let val = 0, mult = 1, type = 'single';
             
             if (r < R.bull) {
-                val = 50; mult = 1; soundType = 'bull';
+                val = 50; type = 'bull';
             } else if (r > R.dout) {
                 processHit(0, 0, "MISS", {x:absX, y:absY});
                 return;
             } else {
-                if (r >= R.bull && r < R.tin) { mult = 1; soundType = 'single'; }
-                else if (r >= R.tin && r < R.tout) { mult = 3; soundType = 'treble'; }
-                else if (r >= R.tout && r < R.din) { mult = 1; soundType = 'single'; }
-                else if (r >= R.din && r <= R.dout) { mult = 2; soundType = 'double'; }
+                if (r >= R.bull && r < R.tin) { mult = 1; type = 'single'; }
+                else if (r >= R.tin && r < R.tout) { mult = 3; type = 'treble'; }
+                else if (r >= R.tout && r < R.din) { mult = 1; type = 'single'; }
+                else if (r >= R.din && r <= R.dout) { mult = 2; type = 'double'; }
 
-                let angleIndex = Math.floor((deg + 90 + 9 + 360) % 360 / 18);
-                angleIndex = angleIndex % 20;
+                let angleIndex = Math.floor((deg + 90 + 9 + 360) % 360 / 18) % 20;
                 val = ORDER[angleIndex];
             }
-
-            processHit(val, mult, null, {x:absX, y:absY}, soundType);
+            processHit(val, mult, null, {x:absX, y:absY}, type);
         }
 
+        // --- 核心處理 (修復 BUST 顯示) ---
         function processHit(val, mult, forceText, pos, soundType) {
             if(isLock) return;
             isLock = true;
@@ -488,11 +461,10 @@
             
             if(pos) showFx(txt, pos.x, pos.y, val, mult);
 
-            // 紀錄歷史 (關鍵修正：加入 startScore 備份)
             state.history.push({
                 idx: state.idx, 
-                prevScore: p.score,      // 投擲前分數
-                startScore: p.startScore,// 該回合起始分數 (用於悔棋還原)
+                prevScore: p.score, 
+                temp: p.temp, 
                 r: state.round, 
                 d: state.darts,
                 rs: [...state.rScores], 
@@ -501,23 +473,28 @@
 
             let newScore = p.score - points;
             
-            // --- 爆分 (BUST) 邏輯修正 ---
             if(newScore < 0) {
+                // BUST
                 state.rScores.push("BUST");
                 playSound('miss');
                 showToast("BUST!");
                 
-                // 修正：回到 startScore (回合起始分)，而不是回到上一鏢的分數
-                p.score = p.startScore;
+                // [關鍵修復]
+                p.score = p.temp; // 還原分數
+                updateUI();       // 立即更新 UI，讓大分數跳回去！
                 
                 setTimeout(() => nextTurn(true), 1000);
+
             } else if(newScore === 0) {
+                // WIN
                 p.score = 0;
                 updateUI();
                 playSound('bull');
                 document.getElementById('lbl-winner').innerText = `Player ${state.idx+1}`;
                 document.getElementById('winner-screen').classList.remove('hidden');
+
             } else {
+                // NORMAL
                 p.score = newScore;
                 state.rScores.push(txt);
                 state.rValues.push(points);
@@ -532,25 +509,24 @@
 
         function nextTurn(isBust) {
             const p = state.players[state.idx];
-            // 爆分顯示扣0分，否則顯示實際扣分
-            let drop = isBust ? 0 : (p.startScore - p.score);
+            let drop = isBust ? 0 : (p.temp - p.score);
             log(`P${state.idx+1}: [${state.rScores.join(',')}] -${drop} → ${p.score}`);
             
-            // 鎖定分數：這一回合結束，目前分數成為下一回合的起始分
-            p.startScore = p.score;
+            p.temp = p.score; // 鎖定下回合起始分
 
             state.darts = 0; 
             state.rScores = []; 
             state.rValues = [];
             
-            document.getElementById(`card-${state.idx}`).classList.remove('active');
+            // [關鍵 ID] 使用 p-{idx} 而非 card-{idx}
+            document.getElementById(`p-${state.idx}`).classList.remove('active');
             state.idx++;
             if(state.idx >= cfg.players) {
                 state.idx = 0;
                 state.round++;
                 log(`--- Round ${state.round} ---`, true);
             }
-            document.getElementById(`card-${state.idx}`).classList.add('active');
+            document.getElementById(`p-${state.idx}`).classList.add('active');
             updateUI();
             isLock = false;
         }
@@ -559,21 +535,18 @@
             if(state.history.length===0 || isLock) return;
             let h = state.history.pop();
             
-            // 如果悔棋跨越了玩家 (回到上一人)
             if(h.idx !== state.idx) {
-                document.getElementById(`card-${state.idx}`).classList.remove('active');
-                state.idx = h.idx; 
-                state.round = h.r;
-                document.getElementById(`card-${state.idx}`).classList.add('active');
-                let list = document.getElementById('log-list');
-                if(list.lastChild) list.removeChild(list.lastChild);
+                document.getElementById(`p-${state.idx}`).classList.remove('active');
+                state.idx = h.idx; state.round = h.r;
+                document.getElementById(`p-${state.idx}`).classList.add('active');
+                let ul = document.getElementById('log-list');
+                if(ul.lastChild) ul.removeChild(ul.lastChild);
+                if(ul.lastChild && ul.lastChild.classList.contains('log-head')) ul.removeChild(ul.lastChild);
             }
 
             let p = state.players[h.idx];
-            
-            // 還原狀態
-            p.score = h.prevScore;      // 還原分數
-            p.startScore = h.startScore; // 關鍵修正：還原回合起始分數 (防止爆分判定錯誤)
+            p.score = h.prevScore;
+            if (h.temp !== undefined) p.temp = h.temp;
             
             state.darts = h.d;
             state.rScores = h.rs;
@@ -584,7 +557,10 @@
         function updateUI() {
             state.players.forEach(pp => document.getElementById(`s-${pp.id}`).innerText = pp.score);
             document.getElementById('lbl-round').innerText = state.round;
-            document.getElementById(`darts-${state.idx}`).innerText = state.rScores.join(' ');
+            
+            // [關鍵 ID] 使用 d-{idx} 確保抓得到元素
+            const dartEl = document.getElementById('d-'+state.idx);
+            if(dartEl) dartEl.innerText = state.rScores.join(' ');
         }
 
         function showFx(txt, x, y, val, mult) {
@@ -617,7 +593,7 @@
                 li.innerText = msg;
             }
             ul.appendChild(li);
-            ul.parentElement.scrollTop = ul.parentElement.scrollHeight;
+            ul.scrollTop = ul.scrollHeight;
         }
 
     </script>
